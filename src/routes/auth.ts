@@ -6,13 +6,12 @@ import {
 	InitiateAuthCommand,
 	GetUserCommand
 } from "@aws-sdk/client-cognito-identity-provider"
+import dotenv from "dotenv"
 import { cognitoClient } from "../utils/awsClient"
 import { generateSecretHash } from "../utils/secretHash"
 import { RegisterRequest, ConfirmRequest, ResendRequest, LoginRequest, CognitoAuthResult } from "../types/auth"
 
 const router = Router()
-
-import dotenv from "dotenv"
 dotenv.config()
 
 const CLIENT_ID = process.env.COGNITO_CLIENT_ID as string

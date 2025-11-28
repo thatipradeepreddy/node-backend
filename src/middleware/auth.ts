@@ -1,4 +1,3 @@
-// src/middleware/auth.ts
 import jwt from "jsonwebtoken"
 import jwksClient from "jwks-rsa"
 import { Request, Response, NextFunction } from "express"

@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser"
 import cors from "cors"
 import authRoutes from "./routes/auth"
 import { authMiddleware } from "./middleware/auth"
+import s3Routes from "./routes/s3"
 
 dotenv.config()
 
@@ -26,6 +27,7 @@ app.use(
 )
 
 app.use("/auth", authRoutes)
+app.use("/s3", s3Routes)
 
 app.get("/protected-route", authMiddleware, (req, res) => {
 	res.json({

@@ -6,6 +6,8 @@ import {
 	InitiateAuthCommand,
 	GetUserCommand
 } from "@aws-sdk/client-cognito-identity-provider"
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import dotenv from "dotenv"
 import { cognitoClient } from "../utils/awsClient"
 import { generateSecretHash } from "../utils/secretHash"
@@ -17,10 +19,20 @@ dotenv.config()
 
 const CLIENT_ID = process.env.COGNITO_CLIENT_ID as string
 const CLIENT_SECRET = process.env.COGNITO_CLIENT_SECRET as string
+const BUCKET = process.env.USER_PROFILE_IMAGE_S3_BUCKET!
+const REGION = process.env.AWS_REGION || "ap-south-1"
+const s3 = new S3Client({ region: REGION })
 
 router.post("/register", async (req: Request<{}, any, RegisterRequest>, res: Response) => {
 	const { name, email, password, phoneNumber, birthdate, gender, picture } = req.body
 	if (!name || !email || !password) return res.status(400).json({ error: "Missing fields" })
+
+	if (picture) {
+		const allowedPrefix = `https://${BUCKET}.s3.${REGION}.amazonaws.com/`
+		if (!picture.startsWith(allowedPrefix)) {
+			return res.status(400).json({ error: "Invalid profile image URL" })
+		}
+	}
 
 	try {
 		const secretHash = generateSecretHash(email, CLIENT_ID, CLIENT_SECRET)
@@ -131,6 +143,19 @@ router.post(
 				if (a.Name) attrs[a.Name] = a.Value ?? ""
 			})
 
+			let pictureUrl = ""
+			if (attrs.picture) {
+				try {
+					const getCmd = new GetObjectCommand({
+						Bucket: process.env.USER_PROFILE_IMAGE_S3_BUCKET!,
+						Key: attrs.picture
+					})
+					pictureUrl = await getSignedUrl(s3, getCmd, { expiresIn: 60 })
+				} catch (err) {
+					console.error("Failed to generate picture URL:", err)
+				}
+			}
+
 			return res.json({
 				AccessToken: tokens.AccessToken,
 				IdToken: tokens.IdToken,
@@ -139,7 +164,7 @@ router.post(
 				TokenType: tokens.TokenType,
 				name: attrs.name || "",
 				email: attrs.email || "",
-				picture: attrs.picture || "",
+				picture: pictureUrl || "",
 				phone_number: attrs.phone_number || "",
 				birthdate: attrs.birthdate || "",
 				gender: attrs.gender || ""

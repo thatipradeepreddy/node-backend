@@ -8,6 +8,7 @@ const client_cognito_identity_provider_1 = require("@aws-sdk/client-cognito-iden
 const dotenv_1 = __importDefault(require("dotenv"));
 const awsClient_1 = require("../utils/awsClient");
 const secretHash_1 = require("../utils/secretHash");
+const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 dotenv_1.default.config();
 const CLIENT_ID = process.env.COGNITO_CLIENT_ID;
@@ -119,5 +120,8 @@ router.post("/login", async (req, res) => {
     catch (err) {
         return res.status(400).json({ error: err.message || "Login failed" });
     }
+});
+router.get("/protected-route", auth_1.authMiddleware, (req, res) => {
+    return res.json({ message: "You accessed a protected route", user: req.user || null });
 });
 exports.default = router;

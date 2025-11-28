@@ -25,8 +25,6 @@ app.use(
 	})
 )
 
-app.options("*", cors())
-
 app.use("/auth", authRoutes)
 
 app.get("/protected-route", authMiddleware, (req, res) => {

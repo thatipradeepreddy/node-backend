@@ -9,6 +9,7 @@ import {
 import dotenv from "dotenv"
 import { cognitoClient } from "../utils/awsClient"
 import { generateSecretHash } from "../utils/secretHash"
+import { authMiddleware } from "../middleware/auth"
 import { RegisterRequest, ConfirmRequest, ResendRequest, LoginRequest, CognitoAuthResult } from "../types/auth"
 
 const router = Router()
@@ -148,5 +149,9 @@ router.post(
 		}
 	}
 )
+
+router.get("/protected-route", authMiddleware, (req: any, res: any) => {
+	return res.json({ message: "You accessed a protected route", user: req.user || null })
+})
 
 export default router

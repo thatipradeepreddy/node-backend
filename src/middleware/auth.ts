@@ -8,8 +8,8 @@ const jwksUri = `https://cognito-idp.${region}.amazonaws.com/${userPoolId}/.well
 
 const client = jwksClient({ jwksUri })
 
-function getKey(header: jwt.JwtHeader, callback: jwt.SigningKeyCallback) {
-	client.getSigningKey(header.kid!, function (err, key) {
+const getKey = (header: jwt.JwtHeader, callback: jwt.SigningKeyCallback) => {
+	client.getSigningKey(header.kid!, (err, key) => {
 		if (err) return callback(err as any)
 		const pub = key?.getPublicKey()
 		callback(null, pub as jwt.Secret)
@@ -30,11 +30,11 @@ declare module "express-serve-static-core" {
 	}
 }
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+export const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
+	if (req.method === "OPTIONS") return next()
 	const auth = req.headers.authorization
 	if (!auth || !auth.startsWith("Bearer ")) return res.status(401).json({ error: "Missing Authorization header" })
 	const token = auth.slice("Bearer ".length)
-
 	jwt.verify(token, getKey as any, { algorithms: ["RS256"] }, (err, decoded) => {
 		if (err) return res.status(401).json({ error: "Invalid token", detail: err.message })
 		req.user = decoded as CognitoJwtPayload

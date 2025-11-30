@@ -26,6 +26,8 @@ app.use(
 	})
 )
 
+app.options("*", cors())
+
 app.use("/auth", authRoutes)
 app.use("/s3", s3Routes)
 

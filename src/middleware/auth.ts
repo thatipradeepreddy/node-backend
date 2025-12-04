@@ -41,3 +41,20 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
 		next()
 	})
 }
+
+export const optionalAuth = (req: Request, res: Response, next: NextFunction) => {
+	if (req.method === "OPTIONS") return next()
+	const auth = req.headers.authorization
+	if (!auth) {
+		return next()
+	}
+	if (!auth.startsWith("Bearer ")) {
+		return res.status(401).json({ error: "Invalid Authorization header" })
+	}
+	const token = auth.slice("Bearer ".length)
+	jwt.verify(token, getKey as any, { algorithms: ["RS256"] }, (err, decoded) => {
+		if (err) return res.status(401).json({ error: "Invalid token", detail: err.message })
+		req.user = decoded as CognitoJwtPayload
+		next()
+	})
+}

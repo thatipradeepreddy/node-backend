@@ -3,9 +3,9 @@ export interface RegisterRequest {
 	email: string
 	password: string
 	phoneNumber?: string
-	birthdate?: string 
+	birthdate?: string
 	gender?: string
-	picture?: string // URL
+	picture?: string
 }
 
 export interface ConfirmRequest {

@@ -11,31 +11,20 @@ dotenv.config()
 
 const app = express()
 
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:5173"
+const ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:5173"
 const PORT = process.env.PORT || 4000
-
-app.use(bodyParser.json())
-app.use(cookieParser())
 
 app.use(
 	cors({
-		origin: FRONTEND_ORIGIN,
-		methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+		origin: ORIGIN,
+		methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"],
 		allowedHeaders: ["Content-Type", "Authorization"],
-		credentials: true
+		credentials: false
 	})
 )
 
-app.use((req, res, next) => {
-	if (req.method === "OPTIONS") {
-		res.header("Access-Control-Allow-Origin", FRONTEND_ORIGIN)
-		res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
-		res.header("Access-Control-Allow-Headers", "Content-Type,Authorization")
-		res.header("Access-Control-Allow-Credentials", "true")
-		return res.sendStatus(204)
-	}
-	return next()
-})
+app.use(bodyParser.json())
+app.use(cookieParser())
 
 app.use("/auth", authRoutes)
 app.use("/s3", s3Routes)

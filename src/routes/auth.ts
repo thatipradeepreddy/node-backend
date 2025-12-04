@@ -139,6 +139,7 @@ router.post(
 			const userData = await cognitoClient.send(new GetUserCommand({ AccessToken: tokens.AccessToken }))
 
 			const attrs: Record<string, string> = {}
+
 			userData.UserAttributes?.forEach(a => {
 				if (a.Name) attrs[a.Name] = a.Value ?? ""
 			})
@@ -146,13 +147,35 @@ router.post(
 			let pictureUrl = ""
 			if (attrs.picture) {
 				try {
-					const getCmd = new GetObjectCommand({
-						Bucket: process.env.USER_PROFILE_IMAGE_S3_BUCKET!,
-						Key: attrs.picture
-					})
-					pictureUrl = await getSignedUrl(s3, getCmd, { expiresIn: 60 })
-				} catch (err) {
+					let pictureVal = (attrs.picture || "").trim()
+
+					if (pictureVal.startsWith("http://") || pictureVal.startsWith("https://")) {
+						try {
+							const parsed = new URL(pictureVal)
+							pictureVal = parsed.pathname.replace(/^\//, "")
+						} catch {}
+					}
+
+					let iterations = 0
+					while (iterations < 4) {
+						const decoded = decodeURIComponent(pictureVal)
+						if (decoded === pictureVal) break
+						pictureVal = decoded
+						if (pictureVal.startsWith("http://") || pictureVal.startsWith("https://")) {
+							try {
+								const parsed2 = new URL(pictureVal)
+								pictureVal = parsed2.pathname.replace(/^\//, "")
+							} catch {}
+						}
+						iterations++
+					}
+
+					const bucket = process.env.USER_PROFILE_IMAGE_S3_BUCKET!
+					const getCmd = new GetObjectCommand({ Bucket: bucket, Key: pictureVal })
+					pictureUrl = await getSignedUrl(s3, getCmd, { expiresIn: 300 })
+				} catch (err: any) {
 					console.error("Failed to generate picture URL:", err)
+					pictureUrl = ""
 				}
 			}
 

@@ -173,6 +173,8 @@ router.post(
 					const bucket = process.env.USER_PROFILE_IMAGE_S3_BUCKET!
 					const getCmd = new GetObjectCommand({ Bucket: bucket, Key: pictureVal })
 					pictureUrl = await getSignedUrl(s3, getCmd, { expiresIn: 300 })
+
+					console.log("Generated picture URL for user", email, "->", getCmd)
 				} catch (err: any) {
 					console.error("Failed to generate picture URL:", err)
 					pictureUrl = ""

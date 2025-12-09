@@ -3,7 +3,6 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb"
 import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, DeleteCommand, ScanCommand } from "@aws-sdk/lib-dynamodb"
 import { v4 as uuidv4 } from "uuid"
 import { CreatePlayerInput, Player, UpdatePlayerInput } from "../types/player.types"
-
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
@@ -65,14 +64,23 @@ async function getPlayerImageUrl(player: Player): Promise<string | undefined> {
 		Key: player.imageKey
 	})
 
-	return await getSignedUrl(s3Client, command, { expiresIn: 3600 })
+	return await getSignedUrl(s3Client, command, { expiresIn: 86400 })
+}
+
+function mapItemToPlayer(item: any): Player | null {
+	if (!item) return null
+	const id = item.id ?? item.playerId
+	return { ...item, id } as Player
 }
 
 async function setPlayerImageKey(id: string, imageKey: string): Promise<Player | null> {
+	const existing = await getPlayerById(id)
+	if (!existing) return null
+
 	const res = await docClient.send(
 		new UpdateCommand({
 			TableName: TABLE_NAME,
-			Key: { id },
+			Key: { id: existing.id, village: existing.village },
 			UpdateExpression: "SET #imageKey = :imageKey, #updatedAt = :updatedAt",
 			ExpressionAttributeNames: {
 				"#imageKey": "imageKey",
@@ -86,14 +94,15 @@ async function setPlayerImageKey(id: string, imageKey: string): Promise<Player |
 		})
 	)
 
-	return (res.Attributes as Player) ?? null
+	return res.Attributes as Player
 }
 
 async function createPlayer(data: CreatePlayerInput): Promise<Player> {
 	const now = new Date().toISOString()
+	const playerId = uuidv4()
 
 	const player: Player = {
-		id: uuidv4(),
+		id: playerId,
 		name: data.name,
 		age: data.age,
 		village: data.village,
@@ -108,7 +117,7 @@ async function createPlayer(data: CreatePlayerInput): Promise<Player> {
 		average: data.average ?? 0,
 		teams: data.teams ?? [],
 		isActive: data.isActive ?? true,
-		imageKey: (data as any).imageKey,
+		imageKey: undefined,
 		createdAt: now,
 		updatedAt: now
 	}
@@ -125,26 +134,29 @@ async function createPlayer(data: CreatePlayerInput): Promise<Player> {
 
 async function getPlayerById(id: string): Promise<Player | null> {
 	const res = await docClient.send(
-		new GetCommand({
+		new ScanCommand({
 			TableName: TABLE_NAME,
-			Key: { id }
+			FilterExpression: "#id = :id",
+			ExpressionAttributeNames: { "#id": "id" },
+			ExpressionAttributeValues: { ":id": id }
 		})
 	)
 
-	return (res.Item as Player) ?? null
+	if (!res.Items || res.Items.length === 0) return null
+
+	return res.Items[0] as Player
 }
 
 async function updatePlayer(id: string, data: UpdatePlayerInput): Promise<Player | null> {
-	if (!Object.keys(data).length) {
-		return getPlayerById(id)
-	}
+	const existing = await getPlayerById(id)
+	if (!existing) return null
 
 	const { UpdateExpression, ExpressionAttributeNames, ExpressionAttributeValues } = buildUpdateExpression(data)
 
 	const res = await docClient.send(
 		new UpdateCommand({
 			TableName: TABLE_NAME,
-			Key: { id },
+			Key: { id: existing.id, village: existing.village },
 			UpdateExpression,
 			ExpressionAttributeNames,
 			ExpressionAttributeValues,
@@ -152,14 +164,17 @@ async function updatePlayer(id: string, data: UpdatePlayerInput): Promise<Player
 		})
 	)
 
-	return (res.Attributes as Player) ?? null
+	return res.Attributes as Player
 }
 
 async function deletePlayer(id: string): Promise<void> {
+	const existing = await getPlayerById(id)
+	if (!existing) return
+
 	await docClient.send(
 		new DeleteCommand({
 			TableName: TABLE_NAME,
-			Key: { id }
+			Key: { id: existing.id, village: existing.village }
 		})
 	)
 }
@@ -171,7 +186,8 @@ async function listPlayers(): Promise<Player[]> {
 		})
 	)
 
-	return (res.Items as Player[]) ?? []
+	const items = (res.Items as any[]) ?? []
+	return items.map(i => mapItemToPlayer(i)).filter(Boolean) as Player[]
 }
 
 export const playerRouter = Router()
@@ -274,6 +290,8 @@ playerRouter.post(
 			const playerId = req.params.id
 			const { fileName, contentType } = req.body
 
+			console.log("Received request for upload URL:", req.body, { fileName, contentType })
+
 			if (!fileName) {
 				return res.status(400).json({ message: "fileName is required" })
 			}
@@ -291,7 +309,7 @@ playerRouter.post(
 				ContentType: contentType
 			})
 
-			const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 })
+			const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 86400 })
 
 			await setPlayerImageKey(playerId, key)
 
@@ -299,9 +317,9 @@ playerRouter.post(
 				uploadUrl,
 				key
 			})
-		} catch (error) {
+		} catch (error: any) {
 			console.error("Error creating upload URL:", error)
-			return res.status(500).json({ message: "Internal server error" })
+			return res.status(500).json({ message: error?.message || "Internal server error" })
 		}
 	}
 )

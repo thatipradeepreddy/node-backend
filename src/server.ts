@@ -4,6 +4,7 @@ import bodyParser from "body-parser"
 import cookieParser from "cookie-parser"
 import cors from "cors"
 import authRoutes from "./routes/auth"
+import { playerRouter } from "./routes/createPlayer"
 import { authMiddleware } from "./middleware/auth"
 import s3Routes from "./routes/s3"
 
@@ -28,6 +29,7 @@ app.use(cookieParser())
 
 app.use("/auth", authRoutes)
 app.use("/s3", s3Routes)
+app.use("/api", playerRouter)
 
 app.get("/protected-route", authMiddleware, (req, res) => {
 	res.json({

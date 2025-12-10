@@ -71,9 +71,16 @@ router.post(
 
 router.post("/register", async (req: Request<{}, any, RegisterRequest>, res: Response) => {
 	const { name, email, password, phoneNumber, birthdate, gender, picture } = req.body
-	if (!name || !email || !password) return res.status(400).json({ error: "Missing fields" })
 
-	if (picture && picture.includes(" ")) {
+	if (!name || !email || !password) {
+		return res.status(400).json({ error: "Missing fields" })
+	}
+
+	if (!picture) {
+		return res.status(400).json({ error: "Profile picture is required" })
+	}
+
+	if (picture.includes(" ")) {
 		return res.status(400).json({ error: "Invalid picture key" })
 	}
 
@@ -90,7 +97,7 @@ router.post("/register", async (req: Request<{}, any, RegisterRequest>, res: Res
 				{ Name: "email", Value: email },
 				{ Name: "birthdate", Value: birthdate || "" },
 				{ Name: "gender", Value: gender || "" },
-				{ Name: "picture", Value: picture || "" }
+				{ Name: "picture", Value: picture }
 			]
 		}
 

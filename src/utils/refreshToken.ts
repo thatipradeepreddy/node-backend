@@ -1,6 +1,6 @@
 import { InitiateAuthCommand, InitiateAuthCommandInput } from "@aws-sdk/client-cognito-identity-provider"
-import { cognitoClient } from "./awsClient"
 import { generateSecretHash } from "./secretHash"
+import { cognitoClient } from "../routes/auth"
 
 export async function refreshAuthTokens(refreshToken: string, clientId: string, clientSecret: string, username: string) {
 	const params: InitiateAuthCommandInput = {

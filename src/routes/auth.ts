@@ -6,13 +6,13 @@ import {
 	InitiateAuthCommand,
 	GetUserCommand
 } from "@aws-sdk/client-cognito-identity-provider"
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3"
+import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import dotenv from "dotenv"
-import { cognitoClient } from "../utils/awsClient"
 import { generateSecretHash } from "../utils/secretHash"
 import { optionalAuth } from "../middleware/auth"
 import { RegisterRequest, ConfirmRequest, ResendRequest, LoginRequest, CognitoAuthResult } from "../types/auth"
+import { CognitoIdentityProviderClient } from "@aws-sdk/client-cognito-identity-provider"
 
 const router = Router()
 dotenv.config()
@@ -23,15 +23,58 @@ const BUCKET = process.env.USER_PROFILE_IMAGE_S3_BUCKET!
 const REGION = process.env.AWS_REGION || "ap-south-1"
 const s3 = new S3Client({ region: REGION })
 
+export const cognitoClient = new CognitoIdentityProviderClient({ region: REGION })
+
+const sanitizeFilename = (name: string) => name.replace(/[^a-zA-Z0-9.\-_]/g, "_").slice(0, 200)
+
+function buildUserImageKey(email: string, fileName: string): string {
+	const safeName = sanitizeFilename(fileName)
+	const now = Date.now()
+	const emailSafe = email.replace(/[^a-zA-Z0-9]/g, "_")
+	return `users/${emailSafe}/profile-${now}-${safeName}`
+}
+
+router.post(
+	"/register/image-url",
+	async (req: Request<{}, unknown, { email: string; fileName: string; contentType?: string }>, res: Response) => {
+		try {
+			const { email, fileName, contentType } = req.body
+
+			if (!BUCKET) {
+				return res.status(500).json({ message: "S3 bucket not configured" })
+			}
+
+			if (!email || !fileName) {
+				return res.status(400).json({ message: "email and fileName are required" })
+			}
+
+			const key = buildUserImageKey(email, fileName)
+
+			const command = new PutObjectCommand({
+				Bucket: BUCKET,
+				Key: key,
+				ContentType: contentType
+			})
+
+			const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 86400 })
+
+			return res.status(200).json({
+				uploadUrl,
+				key
+			})
+		} catch (error: any) {
+			console.error("Error creating register image upload URL:", error)
+			return res.status(500).json({ message: error?.message || "Internal server error" })
+		}
+	}
+)
+
 router.post("/register", async (req: Request<{}, any, RegisterRequest>, res: Response) => {
 	const { name, email, password, phoneNumber, birthdate, gender, picture } = req.body
 	if (!name || !email || !password) return res.status(400).json({ error: "Missing fields" })
 
-	if (picture) {
-		const allowedPrefix = `https://${BUCKET}.s3.${REGION}.amazonaws.com/`
-		if (!picture.startsWith(allowedPrefix)) {
-			return res.status(400).json({ error: "Invalid profile image URL" })
-		}
+	if (picture && picture.includes(" ")) {
+		return res.status(400).json({ error: "Invalid picture key" })
 	}
 
 	try {
@@ -59,6 +102,7 @@ router.post("/register", async (req: Request<{}, any, RegisterRequest>, res: Res
 
 		return res.json({ message: "Signup initiated. Check email or SMS for verification code." })
 	} catch (err: any) {
+		console.error("register error:", err)
 		return res.status(400).json({ error: err.message || "SignUp failed" })
 	}
 })
@@ -145,37 +189,12 @@ router.post(
 			})
 
 			let pictureUrl = ""
-			if (attrs.picture) {
+			if (attrs.picture && BUCKET) {
 				try {
-					let pictureVal = (attrs.picture || "").trim()
-
-					if (pictureVal.startsWith("http://") || pictureVal.startsWith("https://")) {
-						try {
-							const parsed = new URL(pictureVal)
-							pictureVal = parsed.pathname.replace(/^\//, "")
-						} catch {}
-					}
-
-					let iterations = 0
-					while (iterations < 4) {
-						const decoded = decodeURIComponent(pictureVal)
-						if (decoded === pictureVal) break
-						pictureVal = decoded
-						if (pictureVal.startsWith("http://") || pictureVal.startsWith("https://")) {
-							try {
-								const parsed2 = new URL(pictureVal)
-								pictureVal = parsed2.pathname.replace(/^\//, "")
-							} catch {}
-						}
-						iterations++
-					}
-
-					const bucket = process.env.USER_PROFILE_IMAGE_S3_BUCKET!
-					const getCmd = new GetObjectCommand({ Bucket: bucket, Key: pictureVal })
+					const key = attrs.picture.trim()
+					const getCmd = new GetObjectCommand({ Bucket: BUCKET, Key: key })
 					pictureUrl = await getSignedUrl(s3, getCmd, { expiresIn: 300 })
-
-					console.log("Generated picture URL for user", email, "->", getCmd)
-				} catch (err: any) {
+				} catch (err) {
 					console.error("Failed to generate picture URL:", err)
 					pictureUrl = ""
 				}

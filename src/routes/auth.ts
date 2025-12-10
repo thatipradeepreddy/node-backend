@@ -21,7 +21,12 @@ const CLIENT_ID = process.env.COGNITO_CLIENT_ID as string
 const CLIENT_SECRET = process.env.COGNITO_CLIENT_SECRET as string
 const BUCKET = process.env.USER_PROFILE_IMAGE_S3_BUCKET!
 const REGION = process.env.AWS_REGION || "ap-south-1"
-const s3 = new S3Client({ region: REGION })
+
+const s3 = new S3Client({
+	region: REGION,
+	requestChecksumCalculation: "WHEN_REQUIRED",
+	responseChecksumValidation: "WHEN_REQUIRED"
+})
 
 export const cognitoClient = new CognitoIdentityProviderClient({ region: REGION })
 

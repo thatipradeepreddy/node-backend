@@ -2,22 +2,21 @@ import { InitiateAuthCommand, InitiateAuthCommandInput } from "@aws-sdk/client-c
 import { generateSecretHash } from "./secretHash"
 import { cognitoClient } from "../routes/auth"
 
-export async function refreshAuthTokens(refreshToken: string, clientId: string, clientSecret: string, username: string) {
+export async function refreshAuthTokens(refreshToken: string, clientId: string, clientSecret: string, cognitoUsername: string) {
 	const params: InitiateAuthCommandInput = {
 		AuthFlow: "REFRESH_TOKEN_AUTH",
 		ClientId: clientId,
 		AuthParameters: {
 			REFRESH_TOKEN: refreshToken,
-			SECRET_HASH: generateSecretHash(username, clientId, clientSecret)
+			USERNAME: cognitoUsername,
+			SECRET_HASH: generateSecretHash(cognitoUsername, clientId, clientSecret)
 		}
 	}
 
-	const command = new InitiateAuthCommand(params)
-
-	const response = await cognitoClient.send(command)
+	const response = await cognitoClient.send(new InitiateAuthCommand(params))
 
 	if (!response.AuthenticationResult) {
-		throw new Error("Failed to refresh tokens: no AuthenticationResult returned")
+		throw new Error("No AuthenticationResult returned")
 	}
 
 	return response.AuthenticationResult

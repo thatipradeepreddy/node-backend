@@ -28,7 +28,7 @@ export interface CognitoAuthResult {
 	RefreshToken?: string
 	ExpiresIn?: number
 	TokenType?: string
-
+	username: string
 	name?: string
 	email?: string
 	picture?: string

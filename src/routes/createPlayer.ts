@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from "uuid"
 import { CreatePlayerInput, Player, UpdatePlayerInput } from "../types/player.types"
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
+import { authMiddleware } from "../middleware/auth"
 
 const TABLE_NAME = process.env.CYT_PLAYERS_TABLE || "cyt-players-table"
 const REGION = process.env.DYNAMODB_REGION || "ap-south-1"
@@ -192,7 +193,7 @@ async function listPlayers(): Promise<Player[]> {
 
 export const playerRouter = Router()
 
-playerRouter.post("/players", async (req: Request<unknown, unknown, CreatePlayerInput>, res: Response) => {
+playerRouter.post("/players", authMiddleware, async (req: Request<unknown, unknown, CreatePlayerInput>, res: Response) => {
 	try {
 		const body = req.body
 
@@ -214,7 +215,7 @@ playerRouter.post("/players", async (req: Request<unknown, unknown, CreatePlayer
 	}
 })
 
-playerRouter.get("/players", async (_req: Request, res: Response) => {
+playerRouter.get("/players", authMiddleware, async (_req: Request, res: Response) => {
 	try {
 		const players = await listPlayers()
 
@@ -232,7 +233,7 @@ playerRouter.get("/players", async (_req: Request, res: Response) => {
 	}
 })
 
-playerRouter.get("/players/:id", async (req: Request, res: Response) => {
+playerRouter.get("/players/:id", authMiddleware, async (req: Request, res: Response) => {
 	try {
 		const id = req.params.id
 		const player = await getPlayerById(id)
@@ -251,28 +252,32 @@ playerRouter.get("/players/:id", async (req: Request, res: Response) => {
 	}
 })
 
-playerRouter.put("/players/:id", async (req: Request<{ id: string }, unknown, UpdatePlayerInput>, res: Response) => {
-	try {
-		const id = req.params.id
-		const updates = req.body
+playerRouter.put(
+	"/players/:id",
+	authMiddleware,
+	async (req: Request<{ id: string }, unknown, UpdatePlayerInput>, res: Response) => {
+		try {
+			const id = req.params.id
+			const updates = req.body
 
-		const updated = await updatePlayer(id, updates)
+			const updated = await updatePlayer(id, updates)
 
-		if (!updated) {
-			return res.status(404).json({ message: "Player not found" })
+			if (!updated) {
+				return res.status(404).json({ message: "Player not found" })
+			}
+
+			const imageUrl = await getPlayerImageUrl(updated)
+			const response: PlayerResponse = { ...updated, imageUrl }
+
+			return res.json(response)
+		} catch (error) {
+			console.error("Error updating player:", error)
+			return res.status(500).json({ message: "Internal server error" })
 		}
-
-		const imageUrl = await getPlayerImageUrl(updated)
-		const response: PlayerResponse = { ...updated, imageUrl }
-
-		return res.json(response)
-	} catch (error) {
-		console.error("Error updating player:", error)
-		return res.status(500).json({ message: "Internal server error" })
 	}
-})
+)
 
-playerRouter.delete("/players/:id", async (req: Request, res: Response) => {
+playerRouter.delete("/players/:id", authMiddleware, async (req: Request, res: Response) => {
 	try {
 		const id = req.params.id
 		await deletePlayer(id)
@@ -285,6 +290,7 @@ playerRouter.delete("/players/:id", async (req: Request, res: Response) => {
 
 playerRouter.post(
 	"/players/:id/image-url",
+	authMiddleware,
 	async (req: Request<{ id: string }, unknown, { fileName: string; contentType?: string }>, res: Response) => {
 		try {
 			const playerId = req.params.id

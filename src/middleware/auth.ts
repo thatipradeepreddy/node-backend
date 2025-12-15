@@ -3,10 +3,18 @@ import jwksClient from "jwks-rsa"
 import { Request, Response, NextFunction } from "express"
 
 const region = process.env.AWS_REGION || "ap-south-1"
-const userPoolId = process.env.COGNITO_USER_POOL_ID || ""
+const userPoolId = process.env.COGNITO_USER_POOL_ID || "ap-south-1_CMmijuUQL"
+
 const jwksUri = `https://cognito-idp.${region}.amazonaws.com/${userPoolId}/.well-known/jwks.json`
 
-const client = jwksClient({ jwksUri })
+const client = jwksClient({
+	jwksUri,
+	cache: true,
+	cacheMaxEntries: 5,
+	cacheMaxAge: 10 * 60 * 1000,
+	rateLimit: true,
+	jwksRequestsPerMinute: 10
+})
 
 const getKey = (header: jwt.JwtHeader, callback: jwt.SigningKeyCallback) => {
 	client.getSigningKey(header.kid!, (err, key) => {
@@ -32,14 +40,35 @@ declare module "express-serve-static-core" {
 
 export const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
 	if (req.method === "OPTIONS") return next()
+
 	const auth = req.headers.authorization
-	if (!auth || !auth.startsWith("Bearer ")) return res.status(401).json({ error: "Missing Authorization header" })
+	if (!auth || !auth.startsWith("Bearer ")) {
+		return res.status(401).json({ error: "Missing Authorization header" })
+	}
+
 	const token = auth.slice("Bearer ".length)
-	jwt.verify(token, getKey as any, { algorithms: ["RS256"] }, (err, decoded) => {
-		if (err) return res.status(401).json({ error: "Invalid token", detail: err.message })
-		req.user = decoded as CognitoJwtPayload
-		next()
-	})
+
+	jwt.verify(
+		token,
+		getKey as any,
+		{
+			algorithms: ["RS256"],
+			issuer: `https://cognito-idp.${region}.amazonaws.com/${userPoolId}`,
+			audience: undefined
+		},
+		(err, decoded: any) => {
+			if (err) {
+				return res.status(401).json({ error: "Invalid token", detail: err.message })
+			}
+
+			if (decoded.token_use !== "access") {
+				return res.status(401).json({ error: "Invalid token type" })
+			}
+
+			req.user = decoded
+			next()
+		}
+	)
 }
 
 export const optionalAuth = (req: Request, res: Response, next: NextFunction) => {
@@ -52,9 +81,14 @@ export const optionalAuth = (req: Request, res: Response, next: NextFunction) =>
 		return res.status(401).json({ error: "Invalid Authorization header" })
 	}
 	const token = auth.slice("Bearer ".length)
-	jwt.verify(token, getKey as any, { algorithms: ["RS256"] }, (err, decoded) => {
-		if (err) return res.status(401).json({ error: "Invalid token", detail: err.message })
-		req.user = decoded as CognitoJwtPayload
+	jwt.verify(token, getKey as any, { algorithms: ["RS256"] }, (err, decoded: any) => {
+		if (err) return res.status(401).json({ error: "Invalid token" })
+
+		if (decoded.token_use !== "access") {
+			return res.status(401).json({ error: "Invalid token type" })
+		}
+
+		req.user = decoded
 		next()
 	})
 }

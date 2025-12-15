@@ -9,10 +9,12 @@ import {
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import dotenv from "dotenv"
+import jwt from "jsonwebtoken"
 import { generateSecretHash } from "../utils/secretHash"
 import { optionalAuth } from "../middleware/auth"
 import { RegisterRequest, ConfirmRequest, ResendRequest, LoginRequest, CognitoAuthResult } from "../types/auth"
 import { CognitoIdentityProviderClient } from "@aws-sdk/client-cognito-identity-provider"
+import { refreshAuthTokens } from "../utils/refreshToken"
 
 const router = Router()
 dotenv.config()
@@ -212,12 +214,16 @@ router.post(
 				}
 			}
 
+			const decoded: any = jwt.decode(tokens.AccessToken)
+			const cognitoUsername = decoded?.sub
+
 			return res.json({
 				AccessToken: tokens.AccessToken,
 				IdToken: tokens.IdToken,
 				RefreshToken: tokens.RefreshToken,
 				ExpiresIn: tokens.ExpiresIn,
 				TokenType: tokens.TokenType,
+				username: cognitoUsername,
 				name: attrs.name || "",
 				email: attrs.email || "",
 				picture: pictureUrl || "",
@@ -230,6 +236,26 @@ router.post(
 		}
 	}
 )
+
+router.post("/refresh", async (req, res) => {
+	try {
+		const { refreshToken, username } = req.body
+
+		if (!refreshToken || !username) {
+			return res.status(400).json({ error: "refreshToken and username are required" })
+		}
+
+		const tokens = await refreshAuthTokens(refreshToken, CLIENT_ID, CLIENT_SECRET, username)
+
+		return res.json({
+			accessToken: tokens.AccessToken,
+			expiresIn: tokens.ExpiresIn
+		})
+	} catch (err) {
+		console.error("Refresh token error:", err)
+		return res.status(401).json({ error: "Invalid or expired refresh token" })
+	}
+})
 
 router.get("/protected-route", optionalAuth, (req: any, res: any) => {
 	return res.json({ message: "You accessed a protected route", user: req.user || null })

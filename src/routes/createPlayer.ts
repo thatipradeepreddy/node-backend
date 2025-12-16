@@ -1,25 +1,20 @@
 import { Router, Request, Response } from "express"
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb"
-import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, DeleteCommand, ScanCommand } from "@aws-sdk/lib-dynamodb"
+import { DynamoDBDocumentClient, PutCommand, UpdateCommand, DeleteCommand, ScanCommand } from "@aws-sdk/lib-dynamodb"
 import { v4 as uuidv4 } from "uuid"
 import { CreatePlayerInput, Player, UpdatePlayerInput } from "../types/player.types"
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { authMiddleware } from "../middleware/auth"
+import { QueryCommand } from "@aws-sdk/lib-dynamodb"
 
-const TABLE_NAME = process.env.CYT_PLAYERS_TABLE || "cyt-players-table"
+const TABLE_NAME = process.env.CYT_PLAYERS_TABLE || "cyt-player-table-v3"
 const REGION = process.env.DYNAMODB_REGION || "ap-south-1"
 const PLAYER_IMAGES_BUCKET = process.env.CYT_PLAYER_IMAGES_BUCKET || "cyt-player-images-bucket-v1"
 
-const dynamoClient = new DynamoDBClient({
-	region: REGION
-})
-
+const dynamoClient = new DynamoDBClient({ region: REGION })
 const docClient = DynamoDBDocumentClient.from(dynamoClient)
-
-const s3Client = new S3Client({
-	region: REGION
-})
+const s3Client = new S3Client({ region: REGION })
 
 interface PlayerResponse extends Player {
 	imageUrl?: string
@@ -32,7 +27,6 @@ function buildUpdateExpression(update: UpdatePlayerInput) {
 
 	Object.entries(update).forEach(([key, value]) => {
 		if (value === undefined) return
-
 		const nameKey = `#${key}`
 		const valueKey = `:${key}`
 		ExpressionAttributeNames[nameKey] = key
@@ -53,35 +47,33 @@ function buildUpdateExpression(update: UpdatePlayerInput) {
 
 function buildImageKey(playerId: string, fileName: string): string {
 	const safeName = fileName.replace(/[^a-zA-Z0-9.\-_]/g, "_")
-	const now = Date.now()
-	return `players/${playerId}/profile-${now}-${safeName}`
+	return `players/${playerId}/profile-${Date.now()}-${safeName}`
 }
 
 async function getPlayerImageUrl(player: Player): Promise<string | undefined> {
 	if (!player.imageKey) return undefined
 
-	const command = new GetObjectCommand({
-		Bucket: PLAYER_IMAGES_BUCKET,
-		Key: player.imageKey
-	})
-
-	return await getSignedUrl(s3Client, command, { expiresIn: 86400 })
+	return getSignedUrl(
+		s3Client,
+		new GetObjectCommand({
+			Bucket: PLAYER_IMAGES_BUCKET,
+			Key: player.imageKey
+		}),
+		{ expiresIn: 86400 }
+	)
 }
 
-function mapItemToPlayer(item: any): Player | null {
-	if (!item) return null
-	const id = item.id ?? item.playerId
-	return { ...item, id } as Player
-}
-
-async function setPlayerImageKey(id: string, imageKey: string): Promise<Player | null> {
-	const existing = await getPlayerById(id)
+async function setPlayerImageKey(id: string, imageKey: string, ownerId: string): Promise<Player | null> {
+	const existing = await getPlayerById(id, ownerId)
 	if (!existing) return null
 
 	const res = await docClient.send(
 		new UpdateCommand({
 			TableName: TABLE_NAME,
-			Key: { id: existing.id, village: existing.village },
+			Key: {
+				ownerId: ownerId,
+				id: id
+			},
 			UpdateExpression: "SET #imageKey = :imageKey, #updatedAt = :updatedAt",
 			ExpressionAttributeNames: {
 				"#imageKey": "imageKey",
@@ -98,12 +90,13 @@ async function setPlayerImageKey(id: string, imageKey: string): Promise<Player |
 	return res.Attributes as Player
 }
 
-async function createPlayer(data: CreatePlayerInput): Promise<Player> {
+async function createPlayer(ownerId: string, data: CreatePlayerInput): Promise<Player> {
 	const now = new Date().toISOString()
 	const playerId = uuidv4()
 
 	const player: Player = {
 		id: playerId,
+		ownerId,
 		name: data.name,
 		age: data.age,
 		village: data.village,
@@ -123,33 +116,32 @@ async function createPlayer(data: CreatePlayerInput): Promise<Player> {
 		updatedAt: now
 	}
 
-	await docClient.send(
-		new PutCommand({
-			TableName: TABLE_NAME,
-			Item: player
-		})
-	)
-
+	await docClient.send(new PutCommand({ TableName: TABLE_NAME, Item: player }))
 	return player
 }
 
-async function getPlayerById(id: string): Promise<Player | null> {
+async function getPlayerById(id: string, ownerId: string): Promise<Player | null> {
 	const res = await docClient.send(
-		new ScanCommand({
+		new QueryCommand({
 			TableName: TABLE_NAME,
-			FilterExpression: "#id = :id",
-			ExpressionAttributeNames: { "#id": "id" },
-			ExpressionAttributeValues: { ":id": id }
+			KeyConditionExpression: "#ownerId = :ownerId AND #id = :id",
+			ExpressionAttributeNames: {
+				"#ownerId": "ownerId",
+				"#id": "id"
+			},
+			ExpressionAttributeValues: {
+				":ownerId": ownerId,
+				":id": id
+			}
 		})
 	)
 
 	if (!res.Items || res.Items.length === 0) return null
-
 	return res.Items[0] as Player
 }
 
-async function updatePlayer(id: string, data: UpdatePlayerInput): Promise<Player | null> {
-	const existing = await getPlayerById(id)
+async function updatePlayer(id: string, ownerId: string, data: UpdatePlayerInput): Promise<Player | null> {
+	const existing = await getPlayerById(id, ownerId)
 	if (!existing) return null
 
 	const { UpdateExpression, ExpressionAttributeNames, ExpressionAttributeValues } = buildUpdateExpression(data)
@@ -157,7 +149,7 @@ async function updatePlayer(id: string, data: UpdatePlayerInput): Promise<Player
 	const res = await docClient.send(
 		new UpdateCommand({
 			TableName: TABLE_NAME,
-			Key: { id: existing.id, village: existing.village },
+			Key: { ownerId, id },
 			UpdateExpression,
 			ExpressionAttributeNames,
 			ExpressionAttributeValues,
@@ -168,164 +160,89 @@ async function updatePlayer(id: string, data: UpdatePlayerInput): Promise<Player
 	return res.Attributes as Player
 }
 
-async function deletePlayer(id: string): Promise<void> {
-	const existing = await getPlayerById(id)
+async function deletePlayer(id: string, ownerId: string): Promise<void> {
+	const existing = await getPlayerById(id, ownerId)
 	if (!existing) return
 
 	await docClient.send(
 		new DeleteCommand({
 			TableName: TABLE_NAME,
-			Key: { id: existing.id, village: existing.village }
+			Key: { ownerId, id }
 		})
 	)
 }
 
-async function listPlayers(): Promise<Player[]> {
+async function listPlayers(ownerId: string): Promise<Player[]> {
 	const res = await docClient.send(
-		new ScanCommand({
-			TableName: TABLE_NAME
+		new QueryCommand({
+			TableName: TABLE_NAME,
+			KeyConditionExpression: "#ownerId = :ownerId",
+			ExpressionAttributeNames: {
+				"#ownerId": "ownerId"
+			},
+			ExpressionAttributeValues: {
+				":ownerId": ownerId
+			}
 		})
 	)
-
-	const items = (res.Items as any[]) ?? []
-	return items.map(i => mapItemToPlayer(i)).filter(Boolean) as Player[]
+	return (res.Items as Player[]) ?? []
 }
 
 export const playerRouter = Router()
 
-playerRouter.post("/players", authMiddleware, async (req: Request<unknown, unknown, CreatePlayerInput>, res: Response) => {
-	try {
-		const body = req.body
-
-		if (!body.name || !body.village || !body.role) {
-			return res.status(400).json({
-				message: "name, village and role are required"
-			})
-		}
-
-		const player = await createPlayer(body)
-		const imageUrl = await getPlayerImageUrl(player)
-
-		const response: PlayerResponse = { ...player, imageUrl }
-
-		return res.status(201).json(response)
-	} catch (error) {
-		console.error("Error creating player:", error)
-		return res.status(500).json({ message: "Internal server error" })
-	}
+playerRouter.post("/players", authMiddleware, async (req, res) => {
+	const ownerId = (req.user as any).sub
+	const player = await createPlayer(ownerId, req.body)
+	res.status(201).json({ ...player, imageUrl: await getPlayerImageUrl(player) })
 })
 
-playerRouter.get("/players", authMiddleware, async (_req: Request, res: Response) => {
-	try {
-		const players = await listPlayers()
-
-		const playersWithUrls: PlayerResponse[] = await Promise.all(
-			players.map(async p => ({
-				...p,
-				imageUrl: await getPlayerImageUrl(p)
-			}))
-		)
-
-		return res.json(playersWithUrls)
-	} catch (error) {
-		console.error("Error listing players:", error)
-		return res.status(500).json({ message: "Internal server error" })
-	}
+playerRouter.get("/players", authMiddleware, async (req, res) => {
+	const ownerId = (req.user as any).sub
+	const players = await listPlayers(ownerId)
+	res.json(await Promise.all(players.map(async p => ({ ...p, imageUrl: await getPlayerImageUrl(p) }))))
 })
 
-playerRouter.get("/players/:id", authMiddleware, async (req: Request, res: Response) => {
-	try {
-		const id = req.params.id
-		const player = await getPlayerById(id)
-
-		if (!player) {
-			return res.status(404).json({ message: "Player not found" })
-		}
-
-		const imageUrl = await getPlayerImageUrl(player)
-		const response: PlayerResponse = { ...player, imageUrl }
-
-		return res.json(response)
-	} catch (error) {
-		console.error("Error getting player:", error)
-		return res.status(500).json({ message: "Internal server error" })
-	}
+playerRouter.get("/players/:id", authMiddleware, async (req, res) => {
+	const ownerId = (req.user as any).sub
+	const player = await getPlayerById(req.params.id, ownerId)
+	if (!player) return res.status(404).json({ message: "Player not found" })
+	res.json({ ...player, imageUrl: await getPlayerImageUrl(player) })
 })
 
-playerRouter.put(
-	"/players/:id",
-	authMiddleware,
-	async (req: Request<{ id: string }, unknown, UpdatePlayerInput>, res: Response) => {
-		try {
-			const id = req.params.id
-			const updates = req.body
-
-			const updated = await updatePlayer(id, updates)
-
-			if (!updated) {
-				return res.status(404).json({ message: "Player not found" })
-			}
-
-			const imageUrl = await getPlayerImageUrl(updated)
-			const response: PlayerResponse = { ...updated, imageUrl }
-
-			return res.json(response)
-		} catch (error) {
-			console.error("Error updating player:", error)
-			return res.status(500).json({ message: "Internal server error" })
-		}
-	}
-)
-
-playerRouter.delete("/players/:id", authMiddleware, async (req: Request, res: Response) => {
-	try {
-		const id = req.params.id
-		await deletePlayer(id)
-		return res.status(204).send()
-	} catch (error) {
-		console.error("Error deleting player:", error)
-		return res.status(500).json({ message: "Internal server error" })
-	}
+playerRouter.put("/players/:id", authMiddleware, async (req, res) => {
+	const ownerId = (req.user as any).sub
+	const updated = await updatePlayer(req.params.id, ownerId, req.body)
+	if (!updated) return res.status(404).json({ message: "Player not found" })
+	res.json({ ...updated, imageUrl: await getPlayerImageUrl(updated) })
 })
 
-playerRouter.post(
-	"/players/:id/image-url",
-	authMiddleware,
-	async (req: Request<{ id: string }, unknown, { fileName: string; contentType?: string }>, res: Response) => {
-		try {
-			const playerId = req.params.id
-			const { fileName, contentType } = req.body
+playerRouter.delete("/players/:id", authMiddleware, async (req, res) => {
+	const ownerId = (req.user as any).sub
+	const existing = await getPlayerById(req.params.id, ownerId)
 
-			console.log("Received request for upload URL:", req.body, { fileName, contentType })
-
-			if (!fileName) {
-				return res.status(400).json({ message: "fileName is required" })
-			}
-
-			const player = await getPlayerById(playerId)
-			if (!player) {
-				return res.status(404).json({ message: "Player not found" })
-			}
-
-			const key = buildImageKey(playerId, fileName)
-
-			const command = new PutObjectCommand({
-				Bucket: PLAYER_IMAGES_BUCKET,
-				Key: key,
-				ContentType: contentType
-			})
-
-			const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 86400 })
-
-			await setPlayerImageKey(playerId, key)
-
-			return res.status(200).json({
-				uploadUrl,
-				key
-			})
-		} catch (error: any) {
-			console.error("Error creating upload URL:", error)
-			return res.status(500).json({ message: error?.message || "Internal server error" })
-		}
+	if (!existing) {
+		return res.status(404).json({ message: "Player not found" })
 	}
-)
+	await deletePlayer(req.params.id, ownerId)
+	res.status(204).send()
+})
+
+playerRouter.post("/players/:id/image-url", authMiddleware, async (req, res) => {
+	const ownerId = (req.user as any).sub
+	const player = await getPlayerById(req.params.id, ownerId)
+	if (!player) return res.status(404).json({ message: "Player not found" })
+
+	const key = buildImageKey(req.params.id, req.body.fileName)
+	const uploadUrl = await getSignedUrl(
+		s3Client,
+		new PutObjectCommand({
+			Bucket: PLAYER_IMAGES_BUCKET,
+			Key: key,
+			ContentType: req.body.contentType
+		}),
+		{ expiresIn: 86400 }
+	)
+
+	await setPlayerImageKey(req.params.id, key, ownerId)
+	res.json({ uploadUrl, key })
+})

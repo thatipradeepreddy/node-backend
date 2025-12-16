@@ -14,6 +14,7 @@ export type BowlingStyle =
 
 export interface Player {
 	id: string
+	ownerId: string
 	name: string
 	age?: number
 	village: string

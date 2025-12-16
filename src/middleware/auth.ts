@@ -41,12 +41,12 @@ declare module "express-serve-static-core" {
 export const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
 	if (req.method === "OPTIONS") return next()
 
-	const auth = req.headers.authorization
-	if (!auth || !auth.startsWith("Bearer ")) {
-		return res.status(401).json({ error: "Missing Authorization header" })
-	}
+	const token =
+		req.cookies?.accessToken || (req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7) : null)
 
-	const token = auth.slice("Bearer ".length)
+	if (!token) {
+		return res.status(401).json({ error: "Unauthorized" })
+	}
 
 	jwt.verify(
 		token,
@@ -73,22 +73,28 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
 
 export const optionalAuth = (req: Request, res: Response, next: NextFunction) => {
 	if (req.method === "OPTIONS") return next()
-	const auth = req.headers.authorization
-	if (!auth) {
-		return next()
-	}
-	if (!auth.startsWith("Bearer ")) {
-		return res.status(401).json({ error: "Invalid Authorization header" })
-	}
-	const token = auth.slice("Bearer ".length)
-	jwt.verify(token, getKey as any, { algorithms: ["RS256"] }, (err, decoded: any) => {
-		if (err) return res.status(401).json({ error: "Invalid token" })
 
-		if (decoded.token_use !== "access") {
-			return res.status(401).json({ error: "Invalid token type" })
+	const token =
+		req.cookies?.accessToken || (req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.slice(7) : null)
+
+	if (!token) return next()
+
+	jwt.verify(
+		token,
+		getKey as any,
+		{
+			algorithms: ["RS256"],
+			issuer: `https://cognito-idp.${region}.amazonaws.com/${userPoolId}`
+		},
+		(err, decoded: any) => {
+			if (err) return res.status(401).json({ error: "Invalid token" })
+
+			if (decoded.token_use !== "access") {
+				return res.status(401).json({ error: "Invalid token type" })
+			}
+
+			req.user = decoded
+			next()
 		}
-
-		req.user = decoded
-		next()
-	})
+	)
 }

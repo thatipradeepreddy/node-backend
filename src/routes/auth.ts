@@ -4,16 +4,26 @@ import {
 	ConfirmSignUpCommand,
 	ResendConfirmationCodeCommand,
 	InitiateAuthCommand,
-	GetUserCommand
+	GetUserCommand,
+	ForgotPasswordCommand,
+	ConfirmForgotPasswordCommand,
+	CognitoIdentityProviderClient
 } from "@aws-sdk/client-cognito-identity-provider"
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import dotenv from "dotenv"
 import jwt from "jsonwebtoken"
 import { generateSecretHash } from "../utils/secretHash"
-import { optionalAuth } from "../middleware/auth"
-import { RegisterRequest, ConfirmRequest, ResendRequest, LoginRequest, CognitoAuthResult } from "../types/auth"
-import { CognitoIdentityProviderClient } from "@aws-sdk/client-cognito-identity-provider"
+import { authMiddleware, optionalAuth } from "../middleware/auth"
+import {
+	RegisterRequest,
+	ConfirmRequest,
+	ResendRequest,
+	LoginRequest,
+	CognitoAuthResult,
+	ForgotPasswordRequest,
+	ConfirmForgotPasswordRequest
+} from "../types/auth"
 import { refreshAuthTokens } from "../utils/refreshToken"
 
 const router = Router()
@@ -217,20 +227,32 @@ router.post(
 			const decoded: any = jwt.decode(tokens.AccessToken)
 			const cognitoUsername = decoded?.sub
 
-			return res.json({
-				AccessToken: tokens.AccessToken,
-				IdToken: tokens.IdToken,
-				RefreshToken: tokens.RefreshToken,
-				ExpiresIn: tokens.ExpiresIn,
-				TokenType: tokens.TokenType,
-				username: cognitoUsername,
-				name: attrs.name || "",
-				email: attrs.email || "",
-				picture: pictureUrl || "",
-				phone_number: attrs.phone_number || "",
-				birthdate: attrs.birthdate || "",
-				gender: attrs.gender || ""
+			res.cookie("accessToken", tokens.AccessToken, {
+				httpOnly: true,
+				secure: false,
+				sameSite: "lax",
+				maxAge: (tokens.ExpiresIn ?? 3600) * 1000
 			})
+				.cookie("idToken", tokens.IdToken, {
+					httpOnly: true,
+					secure: false,
+					sameSite: "lax"
+				})
+				.cookie("refreshToken", tokens.RefreshToken, {
+					httpOnly: true,
+					secure: false,
+					sameSite: "lax"
+				})
+				.status(200)
+				.json({
+					username: cognitoUsername,
+					name: attrs.name || "",
+					email: attrs.email || "",
+					picture: pictureUrl || "",
+					phone_number: attrs.phone_number || "",
+					birthdate: attrs.birthdate || "",
+					gender: attrs.gender || ""
+				})
 		} catch (err: any) {
 			return res.status(400).json({ error: err.message || "Login failed" })
 		}
@@ -239,22 +261,131 @@ router.post(
 
 router.post("/refresh", async (req, res) => {
 	try {
-		const { refreshToken, username } = req.body
+		const refreshToken = req.cookies.refreshToken
+		const idToken = req.cookies.idToken
 
-		if (!refreshToken || !username) {
-			return res.status(400).json({ error: "refreshToken and username are required" })
+		if (!refreshToken || !idToken) {
+			return res.status(401).json({ error: "No refresh session" })
+		}
+
+		const decoded: any = jwt.decode(idToken)
+		const username = decoded?.sub
+
+		if (!username) {
+			return res.status(401).json({ error: "Invalid session" })
 		}
 
 		const tokens = await refreshAuthTokens(refreshToken, CLIENT_ID, CLIENT_SECRET, username)
 
-		return res.json({
-			accessToken: tokens.AccessToken,
-			expiresIn: tokens.ExpiresIn
+		res.cookie("accessToken", tokens.AccessToken, {
+			httpOnly: true,
+			secure: false,
+			sameSite: "lax",
+			maxAge: (tokens.ExpiresIn ?? 3600) * 1000
 		})
+			.cookie("idToken", tokens.IdToken, {
+				httpOnly: true,
+				secure: false,
+				sameSite: "lax"
+			})
+			.status(200)
+			.json({ success: true })
 	} catch (err) {
 		console.error("Refresh token error:", err)
 		return res.status(401).json({ error: "Invalid or expired refresh token" })
 	}
+})
+
+router.post("/forgot-password", async (req: Request<{}, any, ForgotPasswordRequest>, res: Response) => {
+	const { email } = req.body
+
+	if (!email) {
+		return res.status(400).json({ error: "Email is required" })
+	}
+
+	try {
+		const secretHash = generateSecretHash(email, CLIENT_ID, CLIENT_SECRET)
+
+		await cognitoClient.send(
+			new ForgotPasswordCommand({
+				ClientId: CLIENT_ID,
+				Username: email,
+				SecretHash: secretHash
+			})
+		)
+
+		return res.json({
+			message: "Password reset code sent to registered email/phone"
+		})
+	} catch (err: any) {
+		console.error("Forgot password error:", err)
+		return res.status(400).json({
+			error: err.message || "Failed to initiate forgot password"
+		})
+	}
+})
+
+router.post("/confirm-forgot-password", async (req: Request<{}, any, ConfirmForgotPasswordRequest>, res: Response) => {
+	const { email, code, newPassword } = req.body
+
+	if (!email || !code || !newPassword) {
+		return res.status(400).json({
+			error: "email, code and newPassword are required"
+		})
+	}
+
+	try {
+		const secretHash = generateSecretHash(email, CLIENT_ID, CLIENT_SECRET)
+
+		await cognitoClient.send(
+			new ConfirmForgotPasswordCommand({
+				ClientId: CLIENT_ID,
+				Username: email,
+				ConfirmationCode: code,
+				Password: newPassword,
+				SecretHash: secretHash
+			})
+		)
+
+		return res.json({
+			message: "Password reset successful. You can now login."
+		})
+	} catch (err: any) {
+		console.error("Confirm forgot password error:", err)
+		return res.status(400).json({
+			error: err.message || "Failed to reset password"
+		})
+	}
+})
+
+router.get("/me", authMiddleware, (req, res) => {
+	res.status(200).json({
+		user: {
+			id: (req.user as any).sub,
+			email: (req.user as any).email,
+			name: (req.user as any).name
+		}
+	})
+})
+
+router.post("/logout", (req, res) => {
+	res.clearCookie("accessToken", {
+		httpOnly: true,
+		sameSite: "lax",
+		secure: false
+	})
+		.clearCookie("idToken", {
+			httpOnly: true,
+			sameSite: "lax",
+			secure: false
+		})
+		.clearCookie("refreshToken", {
+			httpOnly: true,
+			sameSite: "lax",
+			secure: false
+		})
+		.status(200)
+		.json({ message: "Logged out" })
 })
 
 router.get("/protected-route", optionalAuth, (req: any, res: any) => {

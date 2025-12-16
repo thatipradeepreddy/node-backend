@@ -36,3 +36,13 @@ export interface CognitoAuthResult {
 	birthdate?: string
 	gender?: string
 }
+
+export interface ForgotPasswordRequest {
+	email: string
+}
+
+export interface ConfirmForgotPasswordRequest {
+	email: string
+	code: string
+	newPassword: string
+}

@@ -4,9 +4,8 @@ const QDRANT_URL = "http://localhost:6333"
 const COLLECTION = "players"
 
 export async function searchPlayerIds(vector: number[], ownerId: string, limit = 5): Promise<string[]> {
-	// 🛑 HARD SAFETY CHECK
 	if (!Array.isArray(vector) || vector.length !== 384) {
-		console.error("❌ Invalid vector passed to Qdrant:", vector)
+		console.error("Invalid vector passed to Qdrant:", vector)
 		return []
 	}
 

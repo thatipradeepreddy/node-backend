@@ -19,7 +19,6 @@ export function setupWebSocket(server: http.Server) {
 
 	wss.on("connection", async (ws, req) => {
 		try {
-			// 🔐 Auth via HttpOnly cookie
 			const cookies = cookie.parse(req.headers.cookie || "")
 			const token = cookies.accessToken
 
@@ -31,7 +30,6 @@ export function setupWebSocket(server: http.Server) {
 			const decoded = await verifyCognitoToken(token)
 			const ownerId = decoded.sub as string
 
-			// ✅ MESSAGE HANDLER (PER CLIENT)
 			ws.on("message", async raw => {
 				try {
 					const { prompt } = JSON.parse(raw.toString())
@@ -39,7 +37,6 @@ export function setupWebSocket(server: http.Server) {
 
 					const intent = detectIntent(prompt)
 
-					// 👋 GREETING
 					if (intent === "GREETING") {
 						ws.send(
 							JSON.stringify({
@@ -49,17 +46,14 @@ export function setupWebSocket(server: http.Server) {
 						return
 					}
 
-					// 📘 GENERAL CRICKET (NO DB)
 					if (intent === "GENERAL") {
 						const answer = await groq.generateInsight(prompt)
 						ws.send(JSON.stringify({ answer }))
 						return
 					}
 
-					// 🧠 DB CONTEXT REQUIRED → EMBED USER PROMPT
 					const vector = await embed(prompt)
 
-					// ⛔ HARD SAFETY
 					if (!Array.isArray(vector) || vector.length !== 384) {
 						ws.send(
 							JSON.stringify({

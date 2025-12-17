@@ -7,5 +7,5 @@ export async function reindexAllPlayers(ownerId: string) {
 		await indexPlayer(player)
 	}
 
-	console.log(`✅ Reindexed ${players.length} players`)
+	console.log(` Reindexed ${players.length} players`)
 }

@@ -8,9 +8,9 @@ import { buildPlayerPrompt } from "../ai/promptBuilder"
 import { analyzePlayer } from "../ai/playerBrain"
 
 import { detectIntent } from "../rag/intentRouter"
+import { embed } from "../rag/embedder"
 import { searchPlayerIds } from "../rag/vectorStore"
 import { getPlayersByIds } from "../routes/createPlayer"
-import { embed } from "../rag/embedder"
 
 const groq = new GroqProvider(process.env.GROQ_API_KEY!)
 
@@ -32,8 +32,13 @@ export function setupWebSocket(server: http.Server) {
 
 			ws.on("message", async raw => {
 				try {
-					const { prompt } = JSON.parse(raw.toString())
-					if (!prompt || typeof prompt !== "string") return
+					const payload = JSON.parse(raw.toString())
+					const prompt: string = payload?.prompt
+
+					if (!prompt || typeof prompt !== "string") {
+						ws.send(JSON.stringify({ error: "Invalid prompt" }))
+						return
+					}
 
 					const intent = detectIntent(prompt)
 
@@ -46,7 +51,7 @@ export function setupWebSocket(server: http.Server) {
 						return
 					}
 
-					if (intent === "GENERAL") {
+					if (intent === "GENERAL_CRICKET") {
 						const answer = await groq.generateInsight(prompt)
 						ws.send(JSON.stringify({ answer }))
 						return
@@ -68,16 +73,26 @@ export function setupWebSocket(server: http.Server) {
 					if (!playerIds.length) {
 						ws.send(
 							JSON.stringify({
-								answer: "No relevant players found. Try being more specific."
+								answer: "I couldn’t find relevant players in your team. Try being more specific."
 							})
 						)
 						return
 					}
 
 					const players = await getPlayersByIds(ownerId, playerIds)
-					const analysis = players.map(analyzePlayer)
 
+					if (!players.length) {
+						ws.send(
+							JSON.stringify({
+								answer: "Player data is not available at the moment."
+							})
+						)
+						return
+					}
+
+					const analysis = players.map(analyzePlayer)
 					const aiPrompt = buildPlayerPrompt(prompt, players, analysis)
+
 					const answer = await groq.generateInsight(aiPrompt)
 
 					ws.send(JSON.stringify({ answer }))

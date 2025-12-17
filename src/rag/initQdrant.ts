@@ -13,7 +13,7 @@ export async function initQdrantCollection() {
 			}
 		})
 
-		console.log("✅ Qdrant collection 'players' ready")
+		console.log("Qdrant collection 'players' ready")
 	} catch (err: any) {
 		if (err.response?.status === 409) {
 			console.log("ℹ️ Qdrant collection already exists")

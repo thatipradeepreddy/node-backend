@@ -104,7 +104,6 @@ const QDRANT_URL = "http://localhost:6333"
 const COLLECTION = "players"
 
 export async function indexPlayer(player: Player) {
-	// 1️⃣ Build text for embedding (stable + deterministic)
 	const textForEmbedding = `
 	${player.name}
 	${player.role}
@@ -113,10 +112,8 @@ export async function indexPlayer(player: Player) {
 	${JSON.stringify(player.statsByFormat)}
 	`.trim()
 
-	// 2️⃣ Create embedding
 	const vector = await embed(textForEmbedding)
 
-	// 3️⃣ SAFETY CHECK (VERY IMPORTANT)
 	if (!Array.isArray(vector) || vector.length === 0) {
 		throw new Error("Embedding failed: empty vector")
 	}
@@ -124,8 +121,8 @@ export async function indexPlayer(player: Player) {
 	await axios.put(`${QDRANT_URL}/collections/${COLLECTION}/points`, {
 		points: [
 			{
-				id: player.id, // string is OK
-				vector, // number[]
+				id: player.id,
+				vector,
 				payload: {
 					playerId: player.id,
 					ownerId: player.ownerId

@@ -1,12 +1,22 @@
 import { Router, Request, Response } from "express"
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb"
-import { DynamoDBDocumentClient, PutCommand, UpdateCommand, DeleteCommand, ScanCommand, GetCommand } from "@aws-sdk/lib-dynamodb"
+import {
+	DynamoDBDocumentClient,
+	PutCommand,
+	UpdateCommand,
+	DeleteCommand,
+	ScanCommand,
+	GetCommand,
+	BatchGetCommand
+} from "@aws-sdk/lib-dynamodb"
 import { v4 as uuidv4 } from "uuid"
 import { CreatePlayerInput, Player, UpdatePlayerInput } from "../types/player.types"
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { authMiddleware } from "../middleware/auth"
 import { QueryCommand } from "@aws-sdk/lib-dynamodb"
+import axios from "axios"
+import { embed } from "../rag/embedder"
 
 const TABLE_NAME = process.env.CYT_PLAYERS_TABLE || "cyt-player-table-v3"
 const REGION = process.env.DYNAMODB_REGION || "ap-south-1"
@@ -90,6 +100,40 @@ async function setPlayerImageKey(id: string, imageKey: string, ownerId: string):
 	return res.Attributes as Player
 }
 
+const QDRANT_URL = "http://localhost:6333"
+const COLLECTION = "players"
+
+export async function indexPlayer(player: Player) {
+	// 1️⃣ Build text for embedding (stable + deterministic)
+	const textForEmbedding = `
+	${player.name}
+	${player.role}
+	${player.battingStyle}
+	${player.bowlingStyle}
+	${JSON.stringify(player.statsByFormat)}
+	`.trim()
+
+	// 2️⃣ Create embedding
+	const vector = await embed(textForEmbedding)
+
+	// 3️⃣ SAFETY CHECK (VERY IMPORTANT)
+	if (!Array.isArray(vector) || vector.length === 0) {
+		throw new Error("Embedding failed: empty vector")
+	}
+
+	await axios.put(`${QDRANT_URL}/collections/${COLLECTION}/points`, {
+		points: [
+			{
+				id: player.id, // string is OK
+				vector, // number[]
+				payload: {
+					playerId: player.id,
+					ownerId: player.ownerId
+				}
+			}
+		]
+	})
+}
 async function createPlayer(ownerId: string, data: CreatePlayerInput): Promise<Player> {
 	const now = new Date().toISOString()
 	const playerId = uuidv4()
@@ -112,7 +156,29 @@ async function createPlayer(ownerId: string, data: CreatePlayerInput): Promise<P
 	}
 
 	await docClient.send(new PutCommand({ TableName: TABLE_NAME, Item: player }))
+
 	return player
+}
+
+export async function getPlayersByIds(ownerId: string, playerIds: string[]): Promise<Player[]> {
+	if (playerIds.length === 0) return []
+
+	const keys = playerIds.map(id => ({
+		ownerId,
+		id
+	}))
+
+	const res = await docClient.send(
+		new BatchGetCommand({
+			RequestItems: {
+				[TABLE_NAME]: {
+					Keys: keys
+				}
+			}
+		})
+	)
+
+	return (res.Responses?.[TABLE_NAME] as Player[]) ?? []
 }
 
 export async function getPlayerById(id: string, ownerId: string): Promise<Player | null> {
@@ -182,6 +248,7 @@ export const playerRouter = Router()
 playerRouter.post("/players", authMiddleware, async (req, res) => {
 	const ownerId = (req.user as any).sub
 	const player = await createPlayer(ownerId, req.body)
+	await indexPlayer(player)
 	res.status(201).json({ ...player, imageUrl: await getPlayerImageUrl(player) })
 })
 
@@ -231,6 +298,8 @@ playerRouter.post("/players/:id/stats", authMiddleware, async (req, res) => {
 	}
 
 	const updated = await updatePlayer(req.params.id, ownerId, update)
+	if (!updated) return res.status(404).json({ message: "Player not found" })
+	await indexPlayer(updated)
 	res.json(updated)
 })
 

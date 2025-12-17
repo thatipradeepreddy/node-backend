@@ -10,6 +10,7 @@ import { playerRouter } from "./routes/createPlayer"
 import { authMiddleware } from "./middleware/auth"
 import { setupWebSocket } from "./websocket/wsServer"
 import { playerInsightsRouter } from "./routes/playerInsightsRouter"
+import { initQdrantCollection } from "./rag/initQdrant"
 
 dotenv.config()
 
@@ -47,6 +48,11 @@ app.get("/protected-route", authMiddleware, (req, res) => {
 	})
 })
 
-server.listen(PORT, () => {
-	console.log(`HTTP + WebSocket server running on ${PORT}`)
-})
+async function start() {
+	await initQdrantCollection()
+	server.listen(PORT, () => {
+		console.log(`HTTP + WebSocket server running on ${PORT}`)
+	})
+}
+
+start()

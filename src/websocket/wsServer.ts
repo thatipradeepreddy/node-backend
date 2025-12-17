@@ -3,10 +3,14 @@ import http from "http"
 import cookie from "cookie"
 
 import { verifyCognitoToken } from "../middleware/auth"
-import { listPlayers } from "../routes/createPlayer"
-import { analyzePlayer } from "../ai/playerBrain"
-import { buildPlayerPrompt } from "../ai/promptBuilder"
 import { GroqProvider } from "../ai/groqProvider"
+import { buildPlayerPrompt } from "../ai/promptBuilder"
+import { analyzePlayer } from "../ai/playerBrain"
+
+import { detectIntent } from "../rag/intentRouter"
+import { searchPlayerIds } from "../rag/vectorStore"
+import { getPlayersByIds } from "../routes/createPlayer"
+import { embed } from "../rag/embedder"
 
 const groq = new GroqProvider(process.env.GROQ_API_KEY!)
 
@@ -15,6 +19,7 @@ export function setupWebSocket(server: http.Server) {
 
 	wss.on("connection", async (ws, req) => {
 		try {
+			// 🔐 Auth via HttpOnly cookie
 			const cookies = cookie.parse(req.headers.cookie || "")
 			const token = cookies.accessToken
 
@@ -26,36 +31,67 @@ export function setupWebSocket(server: http.Server) {
 			const decoded = await verifyCognitoToken(token)
 			const ownerId = decoded.sub as string
 
-			;(ws as any).ownerId = ownerId
-
+			// ✅ MESSAGE HANDLER (PER CLIENT)
 			ws.on("message", async raw => {
 				try {
-					const payload = JSON.parse(raw.toString())
-					const { prompt } = payload
+					const { prompt } = JSON.parse(raw.toString())
+					if (!prompt || typeof prompt !== "string") return
 
-					if (!prompt || typeof prompt !== "string") {
+					const intent = detectIntent(prompt)
+
+					// 👋 GREETING
+					if (intent === "GREETING") {
 						ws.send(
 							JSON.stringify({
-								error: "Prompt must be a non-empty string"
+								answer: "Hello 👋 How can I help you with cricket today?"
 							})
 						)
 						return
 					}
 
-					const players = await listPlayers(ownerId)
+					// 📘 GENERAL CRICKET (NO DB)
+					if (intent === "GENERAL") {
+						const answer = await groq.generateInsight(prompt)
+						ws.send(JSON.stringify({ answer }))
+						return
+					}
+
+					// 🧠 DB CONTEXT REQUIRED → EMBED USER PROMPT
+					const vector = await embed(prompt)
+
+					// ⛔ HARD SAFETY
+					if (!Array.isArray(vector) || vector.length !== 384) {
+						ws.send(
+							JSON.stringify({
+								answer: "I couldn’t understand the question clearly. Please rephrase."
+							})
+						)
+						return
+					}
+
+					const playerIds = await searchPlayerIds(vector, ownerId)
+
+					if (!playerIds.length) {
+						ws.send(
+							JSON.stringify({
+								answer: "No relevant players found. Try being more specific."
+							})
+						)
+						return
+					}
+
+					const players = await getPlayersByIds(ownerId, playerIds)
 					const analysis = players.map(analyzePlayer)
 
 					const aiPrompt = buildPlayerPrompt(prompt, players, analysis)
-
 					const answer = await groq.generateInsight(aiPrompt)
 
 					ws.send(JSON.stringify({ answer }))
-				} catch (err: any) {
-					console.error("WS message error:", err.message)
-
+				} catch (err) {
+					console.error("WS message error:", err)
 					ws.send(
 						JSON.stringify({
-							error: "AI service error. Please try again in a moment."
+							error: "Something went wrong. Please try again."
 						})
 					)
 				}

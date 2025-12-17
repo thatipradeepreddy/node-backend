@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express"
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb"
-import { DynamoDBDocumentClient, PutCommand, UpdateCommand, DeleteCommand, ScanCommand } from "@aws-sdk/lib-dynamodb"
+import { DynamoDBDocumentClient, PutCommand, UpdateCommand, DeleteCommand, ScanCommand, GetCommand } from "@aws-sdk/lib-dynamodb"
 import { v4 as uuidv4 } from "uuid"
 import { CreatePlayerInput, Player, UpdatePlayerInput } from "../types/player.types"
 import { S3Client, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3"
@@ -103,12 +103,7 @@ async function createPlayer(ownerId: string, data: CreatePlayerInput): Promise<P
 		role: data.role,
 		battingStyle: data.battingStyle ?? "NONE",
 		bowlingStyle: data.bowlingStyle ?? "NONE",
-		matches: data.matches ?? 0,
-		runs: data.runs ?? 0,
-		wickets: data.wickets ?? 0,
-		strikeRate: data.strikeRate ?? 0,
-		economyRate: data.economyRate ?? 0,
-		average: data.average ?? 0,
+		statsByFormat: {},
 		teams: data.teams ?? [],
 		isActive: data.isActive ?? true,
 		imageKey: undefined,
@@ -120,24 +115,18 @@ async function createPlayer(ownerId: string, data: CreatePlayerInput): Promise<P
 	return player
 }
 
-async function getPlayerById(id: string, ownerId: string): Promise<Player | null> {
+export async function getPlayerById(id: string, ownerId: string): Promise<Player | null> {
 	const res = await docClient.send(
-		new QueryCommand({
+		new GetCommand({
 			TableName: TABLE_NAME,
-			KeyConditionExpression: "#ownerId = :ownerId AND #id = :id",
-			ExpressionAttributeNames: {
-				"#ownerId": "ownerId",
-				"#id": "id"
-			},
-			ExpressionAttributeValues: {
-				":ownerId": ownerId,
-				":id": id
+			Key: {
+				ownerId,
+				id
 			}
 		})
 	)
 
-	if (!res.Items || res.Items.length === 0) return null
-	return res.Items[0] as Player
+	return (res.Item as Player) ?? null
 }
 
 async function updatePlayer(id: string, ownerId: string, data: UpdatePlayerInput): Promise<Player | null> {
@@ -172,7 +161,7 @@ async function deletePlayer(id: string, ownerId: string): Promise<void> {
 	)
 }
 
-async function listPlayers(ownerId: string): Promise<Player[]> {
+export async function listPlayers(ownerId: string): Promise<Player[]> {
 	const res = await docClient.send(
 		new QueryCommand({
 			TableName: TABLE_NAME,
@@ -225,6 +214,24 @@ playerRouter.delete("/players/:id", authMiddleware, async (req, res) => {
 	}
 	await deletePlayer(req.params.id, ownerId)
 	res.status(204).send()
+})
+
+playerRouter.post("/players/:id/stats", authMiddleware, async (req, res) => {
+	const ownerId = (req.user as any).sub
+	const { format, stats } = req.body
+
+	const player = await getPlayerById(req.params.id, ownerId)
+	if (!player) return res.status(404).json({ message: "Player not found" })
+
+	const update = {
+		statsByFormat: {
+			...player.statsByFormat,
+			[format]: stats
+		}
+	}
+
+	const updated = await updatePlayer(req.params.id, ownerId, update)
+	res.json(updated)
 })
 
 playerRouter.post("/players/:id/image-url", authMiddleware, async (req, res) => {

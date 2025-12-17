@@ -38,15 +38,19 @@
 		"express-session": "^1.18.1",
 		"googleapis": "^166.0.0",
 		"helmet": "^8.1.0",
+		"http": "^0.0.1-security",
 		"jsonwebtoken": "^9.0.2",
 		"jwks-rsa": "^3.2.0",
+		"node-fetch": "^3.3.2",
 		"nodemailer": "^7.0.10",
 		"openid-client": "^5.7.0",
-		"prettier": "^3.6.2"
+		"prettier": "^3.6.2",
+		"ws": "^8.18.3"
 	},
 	"devDependencies": {
 		"@types/bcryptjs": "^2.4.6",
 		"@types/better-sqlite3": "^7.6.13",
+		"@types/cookie": "^0.6.0",
 		"@types/cookie-parser": "^1.4.10",
 		"@types/cors": "^2.8.19",
 		"@types/express": "^5.0.5",
@@ -54,6 +58,7 @@
 		"@types/node": "^24.10.1",
 		"@types/nodemailer": "^7.0.4",
 		"@types/uuid": "^10.0.0",
+		"@types/ws": "^8.18.1",
 		"ts-node-dev": "^2.0.0",
 		"typescript": "^5.9.3"
 	}

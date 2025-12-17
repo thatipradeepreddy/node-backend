@@ -98,3 +98,23 @@ export const optionalAuth = (req: Request, res: Response, next: NextFunction) =>
 		}
 	)
 }
+
+export function verifyCognitoToken(token: string): Promise<jwt.JwtPayload> {
+	return new Promise((resolve, reject) => {
+		jwt.verify(
+			token,
+			getKey as any,
+			{
+				algorithms: ["RS256"],
+				issuer: `https://cognito-idp.${region}.amazonaws.com/${userPoolId}`
+			},
+			(err, decoded: any) => {
+				if (err) return reject(err)
+				if (decoded.token_use !== "access") {
+					return reject(new Error("Invalid token type"))
+				}
+				resolve(decoded)
+			}
+		)
+	})
+}

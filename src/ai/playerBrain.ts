@@ -1,36 +1,31 @@
 import { Player } from "../types/player.types"
 
 export function analyzePlayer(player: Player) {
-	const formats = Object.values(player.statsByFormat || {})
-
 	let totalRuns = 0
-	let totalMatches = 0
 	let totalWickets = 0
+	let avgSum = 0
+	let avgCount = 0
 
-	for (const f of formats) {
+	for (const f of Object.values(player.statsByFormat || {})) {
 		if (f.batting) {
 			totalRuns += f.batting.runs
-			totalMatches += f.batting.matches
+			if (f.batting.average) {
+				avgSum += f.batting.average
+				avgCount++
+			}
 		}
 		if (f.bowling) {
 			totalWickets += f.bowling.wickets
 		}
 	}
 
-	const avgRuns = totalMatches ? totalRuns / totalMatches : 0
+	const avgRuns = avgCount ? avgSum / avgCount : 0
 
 	return {
 		totalRuns,
-		totalMatches,
 		totalWickets,
 		avgRuns,
-		roleHint:
-			avgRuns > 40 && totalWickets > 80
-				? "ALL_ROUNDER"
-				: avgRuns > 40
-					? "BATSMAN"
-					: totalWickets > 100
-						? "BOWLER"
-						: "UTILITY"
+		battingImpact: avgRuns * 10,
+		bowlingImpact: totalWickets * 20
 	}
 }

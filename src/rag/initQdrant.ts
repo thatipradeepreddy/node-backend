@@ -2,7 +2,7 @@ import axios from "axios"
 
 const QDRANT_URL = "http://localhost:6333"
 const COLLECTION = "players"
-const VECTOR_SIZE = 768
+const VECTOR_SIZE = 384
 
 export async function initQdrantCollection() {
 	try {

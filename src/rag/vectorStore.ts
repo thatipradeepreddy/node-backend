@@ -63,7 +63,10 @@ export async function searchPlayerIds(vector: number[], ownerId: string, limit =
 			return []
 		}
 
-		const playerIds = results.map(r => r.payload?.playerId).filter((id): id is string => typeof id === "string")
+		const playerIds = results
+			.filter(r => r.score > 0.75)
+			.map(r => r.payload?.playerId)
+			.filter((id): id is string => typeof id === "string")
 
 		return [...new Set(playerIds)]
 	} catch (err: any) {

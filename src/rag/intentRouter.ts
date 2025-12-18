@@ -1,55 +1,30 @@
-export type Intent = "GREETING" | "GENERAL_CRICKET" | "PLAYER_ANALYSIS"
+export type Intent = "GREETING" | "GENERAL_CRICKET" | "PLAYER_ANALYSIS" | "UNKNOWN"
 
 const GREETINGS = ["hi", "hello", "hey", "hai"]
 
-const PURE_CRICKET_THEORY_KEYWORDS = [
-	"what is",
-	"explain",
-	"rules of",
-	"types of",
-	"how does",
-	"difference between",
-	"meaning of"
-]
+const PURE_CRICKET_KEYWORDS = ["what is", "rules", "explain", "types of", "how does", "meaning of"]
 
-const PLAYER_CONTEXT_KEYWORDS = [
+const PLAYER_KEYWORDS = [
 	"player",
 	"players",
-	"my players",
-	"team",
 	"stats",
-	"performance",
-	"best",
 	"compare",
+	"best",
 	"runs",
 	"wickets",
 	"average",
 	"strike rate",
-	"form",
-	"bowling",
 	"batting",
-	"fielding",
-	"spinner",
-	"fast bowler",
-	"batsman",
-	"all rounder",
-	"captain"
+	"bowling",
+	"form"
 ]
 
 export function detectIntent(text: string): Intent {
 	const q = text.toLowerCase().trim()
 
-	if (GREETINGS.includes(q)) {
-		return "GREETING"
-	}
+	if (GREETINGS.some(g => q.startsWith(g))) return "GREETING"
+	if (PLAYER_KEYWORDS.some(k => q.includes(k))) return "PLAYER_ANALYSIS"
+	if (PURE_CRICKET_KEYWORDS.some(k => q.includes(k))) return "GENERAL_CRICKET"
 
-	if (PURE_CRICKET_THEORY_KEYWORDS.some(k => q.startsWith(k))) {
-		return "GENERAL_CRICKET"
-	}
-
-	if (PLAYER_CONTEXT_KEYWORDS.some(k => q.includes(k))) {
-		return "PLAYER_ANALYSIS"
-	}
-
-	return "PLAYER_ANALYSIS"
+	return "UNKNOWN"
 }

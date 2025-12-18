@@ -100,7 +100,7 @@ async function setPlayerImageKey(id: string, imageKey: string, ownerId: string):
 	return res.Attributes as Player
 }
 
-const QDRANT_URL = "http://localhost:6333"
+const QDRANT_URL = process.env.QDRANT_URL || "http://localhost:6333"
 const COLLECTION = "players"
 
 export async function indexPlayer(player: Player) {

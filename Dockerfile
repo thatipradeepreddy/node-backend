@@ -1,39 +1,46 @@
 # Stage 1 - build
-FROM node:20-bullseye as build
+FROM node:20-bullseye AS build
 
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Copy package files
 COPY package*.json ./
+
+# Install all deps (including dev, needed for build)
 RUN npm ci --legacy-peer-deps
 
-# Copy the rest of the source code
+# Copy source
 COPY . .
 
-# Build the TypeScript / app
+# Build the app
 RUN npm run build
 
-# Stage 2 - runtime
-FROM node:20-alpine
+# --------------------------------------------------
+
+# Stage 2 - runtime (⚠️ MUST BE glibc-based)
+FROM node:20-bullseye
 
 WORKDIR /app
 
-# Create non-root user
-RUN addgroup -S app && adduser -S -G app app
+# Install required system libs for onnxruntime
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libc6 \
+    libstdc++6 \
+    libgcc-s1 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy built files and package.json for production dependencies
+# Copy built output
 COPY --from=build /app/dist ./dist
 COPY package*.json ./
 
 ENV NODE_ENV=production
 
-# Install only production dependencies
+# Install only production deps
 RUN npm ci --omit=dev --legacy-peer-deps
 
-# App listens on port 3000
+# App listens on 3000
 EXPOSE 3000
 
-USER app
-
-# Adjust entrypoint if your main file is different
+# Start server
 CMD ["node", "dist/server.js"]

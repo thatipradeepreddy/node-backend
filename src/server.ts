@@ -17,7 +17,7 @@ dotenv.config()
 const app = express()
 
 const ORIGIN =
-	process.env.FRONTEND_ORIGIN || "http://localhost:5173" || "http://ec2-13-201-20-219.ap-south-1.compute.amazonaws.com/"
+	process.env.FRONTEND_ORIGIN || "http://localhost:5173" 
 
 const PORT = process.env.PORT || 3000
 
